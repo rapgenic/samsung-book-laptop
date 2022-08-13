@@ -1,7 +1,10 @@
+#include "linux/printk.h"
 #include <linux/gfp.h>
 #include <linux/device.h>
 #include <linux/acpi.h>
 #include <linux/leds.h>
+
+#define SCAI_CSFI_LEN 0x15
 
 #define SCAI_SAFN 0x5843
 
@@ -61,20 +64,11 @@ static int scai_command(struct scai_data *data, acpi_string pathname, struct sca
 	acpi_handle object;
 	acpi_status status;
 
-	u8 *buff = (u8 *)buf;
-
-	pr_info("SCAI buffer: ");
-
-	for (int i = 0; i < len - 2; i++)
-		pr_info("0x%2x ", buff[i]);
-
-	pr_info("\n");
-
 	buf_obj_list.count = 1;
 	buf_obj_list.pointer = &buf_obj;
 	buf_obj.type = ACPI_TYPE_BUFFER;
 	buf_obj.buffer.length = len;
-	buf_obj.buffer.pointer = (u8 *) &buf;
+	buf_obj.buffer.pointer = (u8 *) buf;
 
 	object = acpi_device_handle(data->acpi_dev);
 	status = acpi_evaluate_object(object, pathname, &buf_obj_list, &ret_buffer);
@@ -103,8 +97,16 @@ static int scai_command(struct scai_data *data, acpi_string pathname, struct sca
 static int scai_csfi_command(struct scai_data *data, struct scai_buffer *buf)
 {
 	int ret;
+	u8 *buff = (u8 *) buf;
 
-	ret = scai_command(data, "CSFI", buf, buf, 0x15);
+	pr_info("CSFI request:  0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x\n",
+		buff[0], buff[1], buff[2], buff[3], buff[4], buff[5], buff[6], buff[7], buff[8], buff[9], buff[10], buff[11], buff[12], buff[13], buff[14], buff[15], buff[16], buff[17], buff[18], buff[19], buff[20]);
+
+	ret = scai_command(data, "CSFI", buf, buf, SCAI_CSFI_LEN);
+
+	pr_info("CSFI response: 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x\n",
+		buff[0], buff[1], buff[2], buff[3], buff[4], buff[5], buff[6], buff[7], buff[8], buff[9], buff[10], buff[11], buff[12], buff[13], buff[14], buff[15], buff[16], buff[17], buff[18], buff[19], buff[20]);
+
 	if (ret != 0) {
 		pr_err("CSFI command failed\n");
 		return ret;
@@ -113,8 +115,6 @@ static int scai_csfi_command(struct scai_data *data, struct scai_buffer *buf)
 	if (buf->rflg != 0xaa) {
 		pr_err("CSFI command was not successful\n");
 		return -1;
-	} else {
-		pr_info("Success!\n");
 	}
 
 	return 0;
@@ -122,6 +122,7 @@ static int scai_csfi_command(struct scai_data *data, struct scai_buffer *buf)
 
 static int scai_enable_command(struct scai_data *data, u16 sasb)
 {
+	int err;
 	struct scai_buffer buf = {0};
 
 	buf.safn = SCAI_SAFN;
@@ -129,7 +130,14 @@ static int scai_enable_command(struct scai_data *data, u16 sasb)
 	buf.gunm = 0xbb;
 	buf.guds[0] = 0xaa;
 
-	return scai_csfi_command(data, &buf);
+	err = scai_csfi_command(data, &buf);
+	if (err)
+		return err;
+
+	if (buf.gunm != 0xdd && buf.guds[0] != 0xcc)
+		return -ENODEV;
+
+	return 0;
 }
 
 static int scai_kb_backlight_set(struct scai_data *data, u8 value)
@@ -138,58 +146,61 @@ static int scai_kb_backlight_set(struct scai_data *data, u8 value)
 
 	buf.safn = SCAI_SAFN;
 	buf.sasb = SCAI_SASB_KB_BACKLIGHT;
-	buf.gunm = 0x82;
+	buf.gunm = SCAI_GUNM_KB_BACKLIGHT_SET;
 	buf.guds[0] = value;
 
 	return scai_csfi_command(data, &buf);
 }
 
-static int scai_kb_led_set(struct led_classdev *led_cdev, enum led_brightness value)
+static int scai_kb_backlight_get(struct scai_data *data, u8 *value)
 {
+	int err;
 	struct scai_buffer buf = {0};
-	struct scai_data *data;
-	union acpi_object buf_obj, *ret_obj;
-	struct acpi_object_list buf_obj_list;
-	struct acpi_buffer ret_buffer = {ACPI_ALLOCATE_BUFFER, NULL};
-	acpi_handle object;
-	acpi_status status;
-
-	data = container_of(led_cdev, struct scai_data, kb_led);
 
 	buf.safn = SCAI_SAFN;
 	buf.sasb = SCAI_SASB_KB_BACKLIGHT;
-	buf.gunm = 0xbb;
-	buf.guds[0] = 0xaa;
+	buf.gunm = SCAI_GUNM_KB_BACKLIGHT_GET;
 
-	buf_obj_list.count = 1;
-	buf_obj_list.pointer = &buf_obj;
-	buf_obj.type = ACPI_TYPE_BUFFER;
-	buf_obj.buffer.length = 0x15;
-	buf_obj.buffer.pointer = (u8 *) &buf;
+	err = scai_csfi_command(data, &buf);
 
-	object = acpi_device_handle(data->acpi_dev);
-	status = acpi_evaluate_object(object, "CSFI", &buf_obj_list, NULL);
+	*value = buf.gunm;
 
-	if (!ACPI_SUCCESS(status))
-		return -1;
+	return err;
+}
 
-	buf.gunm = 0x82;
-	buf.guds[0] = value;
+static int scai_enable_commands(struct scai_data *data)
+{
+	int err;
 
-	status = acpi_evaluate_object(object, "CSFI", &buf_obj_list, NULL);
-
-	if (!ACPI_SUCCESS(status))
-		return -1;
-
-	// err = scai_enable_command(data, SCAI_SASB_KB_BACKLIGHT);
-	// if (err != 0)
-	// 	return err;
-
-	// err = scai_kb_backlight_set(data, value);
-	// if (err != 0)
-	// 	return err;
+	err = scai_enable_command(data, SCAI_SASB_KB_BACKLIGHT);
+	if (err != 0)
+		return err;
 
 	return 0;
+}
+
+static int scai_kb_led_set(struct led_classdev *led_cdev, enum led_brightness value)
+{
+	struct scai_data *data;
+
+	data = container_of(led_cdev, struct scai_data, kb_led);
+	return scai_kb_backlight_set(data, value);
+}
+
+enum led_brightness scai_kb_led_get(struct led_classdev *led_cdev)
+{
+	int err;
+	struct scai_data *data;
+	u8 value;
+
+	data = container_of(led_cdev, struct scai_data, kb_led);
+	err = scai_kb_backlight_get(data, &value);
+	if (err)
+		return 0;
+
+	pr_info("Brightness: %d\n", value);
+
+	return value;
 }
 
 static int scai_add(struct acpi_device *acpi_dev)
@@ -197,16 +208,19 @@ static int scai_add(struct acpi_device *acpi_dev)
 	struct scai_data *data;
 	int err;
 
-	pr_info("Add\n");
-
 	data = devm_kzalloc(&acpi_dev->dev, sizeof(*data), GFP_KERNEL);
 	if (!data)
 		return -ENOMEM;
 	acpi_dev->driver_data = data;
 	data->acpi_dev = acpi_dev;
 
+	err = scai_enable_commands(data);
+	if (err)
+		return err;
+
 	data->kb_led.name = "scai::kbd_backlight";
 	data->kb_led.brightness_set_blocking = scai_kb_led_set;
+	data->kb_led.brightness_get = scai_kb_led_get;
 	data->kb_led.max_brightness = 3;
 
 	err = devm_led_classdev_register(&acpi_dev->dev, &data->kb_led);
@@ -219,8 +233,6 @@ static int scai_add(struct acpi_device *acpi_dev)
 static int scai_remove(struct acpi_device *acpi_dev)
 {
 	struct scai_data *data;
-
-	pr_info("Remove\n");
 
 	data = acpi_driver_data(acpi_dev);
 
