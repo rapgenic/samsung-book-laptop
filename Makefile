@@ -1,4 +1,4 @@
-obj-m += samsung-book-laptop.o
+obj-m += samsung_acpi.o
 
 PWD := $(CURDIR)
 

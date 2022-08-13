@@ -1,5 +1,3 @@
-#include "linux/printk.h"
-#include <linux/gfp.h>
 #include <linux/device.h>
 #include <linux/acpi.h>
 #include <linux/leds.h>
@@ -243,7 +241,7 @@ static int scai_remove(struct acpi_device *acpi_dev)
 
 static struct acpi_driver scai_driver = {
 	.name = "Samsung SCAI Driver",
-	.class = "hotkey",
+	.owner = THIS_MODULE,
 	.ids = device_ids,
 	.ops = {
 		.add = scai_add,
@@ -253,5 +251,6 @@ static struct acpi_driver scai_driver = {
 };
 module_acpi_driver(scai_driver);
 
+MODULE_ALIAS("acpi*:SAM0428:*");
 MODULE_AUTHOR("Giulio Girardi <giulio.girardi@protechgroup.it>");
 MODULE_LICENSE("GPL");
