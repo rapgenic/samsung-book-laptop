@@ -693,7 +693,7 @@ static int kb_led_set(struct led_classdev *led_cdev, enum led_brightness value)
 	return scai_kb_backlight_set(data, value);
 }
 
-enum led_brightness kb_led_get(struct led_classdev *led_cdev)
+static enum led_brightness kb_led_get(struct led_classdev *led_cdev)
 {
 	int err;
 	struct scai_data *data;
@@ -774,7 +774,6 @@ static void scai_notify(struct acpi_device *acpi_dev, u32 event)
 
 static struct acpi_driver scai_driver = {
 	.name = "samsung_acpi",
-	.owner = THIS_MODULE,
 	.ids = device_ids,
 	.flags = ACPI_DRIVER_ALL_NOTIFY_EVENTS,
 	.ops = {
